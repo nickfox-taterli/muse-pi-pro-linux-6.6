@@ -19,8 +19,8 @@
 #include <linux/freezer.h>
 #include <linux/firmware.h>
 #include <linux/elf.h>
-#include <uapi/linux/sched/types.h>
-#include <uapi/linux/sched.h>
+#include <linux/sched/types.h>
+#include <linux/sched.h>
 #include <linux/sched/prio.h>
 #include <linux/rpmsg.h>
 #include <linux/pm_qos.h>
@@ -88,6 +88,7 @@ struct spacemit_rproc {
 	struct spacemit_mbox *mb;
 	char *verid;
 	unsigned int size;
+	struct rproc_mem_entry *rsc_table_mem;
 #ifdef CONFIG_PM_SLEEP
 	struct rpmsg_device *rpdev;
 #ifdef CONFIG_HIBERNATION
@@ -188,6 +189,10 @@ static int spacemit_rproc_prepare(struct rproc *rproc)
 			return -ENOMEM;
 
 		rproc_add_carveout(rproc, mem);
+
+		if (!strcmp(it.node->name, "rsc_table"))
+			priv->rsc_table_mem = mem;
+
 		index++;
 	}
 
@@ -255,8 +260,10 @@ static int spacemit_rproc_start(struct rproc *rproc)
 {
 	struct spacemit_rproc *priv = rproc->priv;
 
-	if (priv->verid != NULL)
-		pr_notice("the firmare version id is:%s\n", rproc_da_to_va(rproc, (u64)priv->verid, priv->size, NULL));
+	if (priv->verid != NULL){
+		void *p = rproc_da_to_va(rproc, (u64)priv->verid, priv->size, NULL);
+		pr_notice("firmware version id @%pap\n", &p);
+	}
 
 	/* enable ipc2ap clk & reset--> rcpu side */
 	writel(0xff, priv->base[BOOTC_MEM_BASE_OFFSET] + ESOS_AON_PER_CLK_RST_CTL_REG);
@@ -363,14 +370,15 @@ static struct rproc_ops spacemit_rproc_ops = {
 
 static int __process_theread(void *arg)
 {
-	int ret;
+	// int ret;
 	struct mbox_client *cl = arg;
 	struct rproc *rproc = dev_get_drvdata(cl->dev);
 	struct spacemit_mbox *mb = container_of(cl, struct spacemit_mbox, client);
-	struct sched_param param = {.sched_priority = 0 };
+	// struct sched_param param = {.sched_priority = 0 };
 
 	mb->kthread_running = true;
-	ret = sched_setscheduler(current, SCHED_FIFO, &param);
+	// ret = sched_setscheduler(current, SCHED_FIFO, &param);
+	sched_set_fifo(current);
 	set_freezable();
 
 	do {
@@ -474,7 +482,7 @@ static struct rpmsg_driver rpmsg_rcpu_pm_client = {
 	.remove		= rpmsg_rcpu_pwr_manage_romove,
 };
 
-module_rpmsg_driver(rpmsg_rcpu_pm_client);
+// module_rpmsg_driver(rpmsg_rcpu_pm_client);
 
 #define RCPU_ENTER_LOW_PWR_MODE		"$"
 
@@ -483,7 +491,7 @@ static int rproc_platform_late(void)
 	int ret;
 	unsigned int val;
 	struct rproc *rproc;
-	struct rproc_mem_entry *src_table_mem;
+	// struct rproc_mem_entry *src_table_mem;
 	struct spacemit_rproc *srproc;
 	struct platform_device *pdev;
 	struct generic_pm_domain *genpd;
@@ -497,15 +505,15 @@ static int rproc_platform_late(void)
 	ret = rpmsg_send(srproc->rpdev->ept, RCPU_ENTER_LOW_PWR_MODE,
 			strlen(RCPU_ENTER_LOW_PWR_MODE));
 
-	src_table_mem = rproc_find_carveout_by_name(rproc, "rsc_table");
-	if (!src_table_mem) {
-		pr_err("Failed to find the rcpu_mem_snapshots\n");
-		return -1;
+	if (!srproc->rsc_table_mem) {
+		pr_err("rsc_table carveout not cached\n");
+		return -ENODEV;
 	}
+	val = readl(srproc->rsc_table_mem->va + 8);
 
 	while (1) {
 		/* will be wrotten by rpcu, using the reserved entry of resource table */
-		val = readl(src_table_mem->va + 8);
+		val = readl(srproc->rsc_table_mem->va + 8);
 		if (val == 1)
 			break;
 	}
@@ -553,7 +561,7 @@ static void rproc_platfrom_wake(void)
 	unsigned int val;
 	struct rproc *rproc;
 	struct spacemit_rproc *srproc;
-	struct rproc_mem_entry *src_table_mem;
+	// struct rproc_mem_entry *src_table_mem;
 	struct platform_device *pdev;
 	struct generic_pm_domain *genpd;
 
@@ -605,15 +613,15 @@ static void rproc_platfrom_wake(void)
 	/* luaching up rpcu */
 	writel(1, srproc->base[BOOTC_MEM_BASE_OFFSET] + ESOS_BOOTUP_REG_OFFSET);
 
-	src_table_mem = rproc_find_carveout_by_name(rproc, "rsc_table");
-	if (!src_table_mem) {
-		pr_err("Failed to find the rcpu_mem_snapshots\n");
+	if (!srproc->rsc_table_mem) {
+		pr_err("rsc_table carveout not cached\n");
 		return;
 	}
+	val = readl(srproc->rsc_table_mem->va + 8);
 
 	while (1) {
 		/* will be wrotten by rpcu: using the reserved entry of resource table */
-		val = readl(src_table_mem->va + 8);
+    	val = readl(srproc->rsc_table_mem->va + 8);
 		if (val == 2)
 			break;
 	}
@@ -914,7 +922,7 @@ static int spacemit_rproc_remove(struct platform_device *pdev)
 	rproc_free(rproc);
 
 #ifdef CONFIG_PM_SLEEP
-	unregister_rpmsg_driver(&rpmsg_rcpu_pm_client);
+	// unregister_rpmsg_driver(&rpmsg_rcpu_pm_client);
 	unregister_platform_pm_ops(&rproc_platform_pm_ops);
 #ifdef CONFIG_HIBERNATION
 	unregister_pm_notifier(&ddata->pm_notifier);
@@ -945,8 +953,7 @@ static void spacemit_rproc_shutdown(struct platform_device *pdev)
 	for (i = 0; i < MAX_MBOX; ++i) {
 		/* release the resource of rt thread */
 		if (priv->mb[i].kthread_running) {
-			if (!frozen((priv->mb[i].mb_thread)))
-				kthread_stop(priv->mb[i].mb_thread);
+			kthread_stop(priv->mb[i].mb_thread);
 		}
 		/* mbox_free_channel(priv->mb[i].chan); */
 	}
@@ -965,11 +972,36 @@ static struct platform_driver spacemit_rproc_driver = {
 	},
 };
 
-static __init int spacemit_rproc_driver_init(void)
+static int __init spacemit_init(void)
 {
-	return platform_driver_register(&spacemit_rproc_driver);
+    int ret;
+
+    ret = platform_driver_register(&spacemit_rproc_driver);
+    if (ret)
+        return ret;
+
+#ifdef CONFIG_PM_SLEEP
+    ret = register_rpmsg_driver(&rpmsg_rcpu_pm_client);
+    if (ret) {
+        platform_driver_unregister(&spacemit_rproc_driver);
+        return ret;
+    }
+#endif
+    return 0;
 }
-device_initcall(spacemit_rproc_driver_init);
+
+static void __exit spacemit_exit(void)
+{
+#ifdef CONFIG_PM_SLEEP
+    unregister_rpmsg_driver(&rpmsg_rcpu_pm_client);
+#endif
+    platform_driver_unregister(&spacemit_rproc_driver);
+}
+
+module_init(spacemit_init);
+module_exit(spacemit_exit);
+
+// module_platform_driver(spacemit_rproc_driver);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("sapcemit remote processor control driver");
