@@ -262,7 +262,7 @@ static int spacemit_rproc_start(struct rproc *rproc)
 
 	if (priv->verid != NULL){
 		void *p = rproc_da_to_va(rproc, (u64)priv->verid, priv->size, NULL);
-		pr_notice("firmware version id @%pap\n", &p);
+		dev_info(&rproc->dev,"firmware version id @%pap\n", &p);
 	}
 
 	/* enable ipc2ap clk & reset--> rcpu side */
@@ -434,7 +434,7 @@ static int rpmsg_rcpu_pwr_cb(struct rpmsg_device *rpdev, void *data,
 	struct spacemit_rproc *srproc;
 
 	if (strcmp(data, "pwr_management_ok") == 0) {
-		pr_err("Connection create success\n");
+		dev_info(&rpdev->dev, "Connection create success\n");
 		return 0;
 	}
 

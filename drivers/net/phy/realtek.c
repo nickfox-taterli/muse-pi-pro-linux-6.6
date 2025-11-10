@@ -636,7 +636,7 @@ static int rtl8211f_led_hw_control_set(struct phy_device *phydev, u8 index,
 	reg <<= RTL8211F_LEDCR_SHIFT * index;
 	reg |= RTL8211F_LEDCR_MODE;      /* Mode B */
 
-	dev_info(&phydev->mdio.dev, "led hw set 0xd04 reg %d val 0x%x, index %d\n", RTL8211F_LEDCR, reg, index);
+	// dev_info(&phydev->mdio.dev, "led hw set 0xd04 reg %d val 0x%x, index %d\n", RTL8211F_LEDCR, reg, index);
 
 	ret = phy_modify_paged(phydev, 0xd04, RTL8211F_LEDCR, mask, reg);
 
